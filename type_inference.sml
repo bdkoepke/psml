@@ -8,13 +8,10 @@ fun I (x:'a):'a = x
 val I = fn x => x
 fun I (x) = x
 
-val J = I I
 fun J x = I I x
 
-(* val l = nil @ nil *)
-
-(* fn x:int => x + x
-fn x:real => x + x *)
+val p = fn x:int => x+x;
+val p = fn x:real => x+x;
 
 (fn x => x + x)(3);
 
@@ -23,10 +20,3 @@ let
 in
     (double 3, double 4)
 end
-
-(*
-fun #name {name=n:string, ...} = n
-fn r : \{name:string,address:string,salary:int\} =>
-   (\#name r, \#address r)
-
-fn r => (\#name r, \#address r) *)
