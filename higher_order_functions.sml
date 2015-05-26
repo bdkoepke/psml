@@ -1,72 +1,173 @@
-val x = 2
-val y = x * x
-val x = y * x
-val y = x * y
+signature SEQUENCE =
+	sig
+		type 'a seq = int -> 'a
 
-val x = 2
-fun f y = x + y
-val x = 3
-val z = f 4
+		val constantly : 'a -> 'a seq
+		val alternately : 'a * 'a -> 'a seq
+		val insert : 'a * 'a seq -> 'a seq
 
-fun map' (f, nil) = nil
-  | map' (f, h::t) = (f h) :: map' (f, t)
+		val map : ('a -> 'b) -> 'a seq -> 'b seq
+		val filter : ('a -> bool) -> 'a seq -> 'a seq
 
-val s = map' (fn x => x + 1, [1, 2, 3, 4])
+		val zip : 'a seq * 'b seq -> ('a * 'b) seq
+		val unzip : ('a * 'b) seq -> 'a seq * 'b seq
+		val merge : 'a seq * 'a seq -> 'a seq
 
-val constantly = fn k => (fn a => k)
+		val stretch : int -> 'a seq -> 'a seq
+		val shrink : int -> 'a seq -> 'a seq
 
-fun constantly k a = k
+		val take : int -> 'a seq -> 'a list
+		val drop : int -> 'a seq -> 'a seq
+		val shift : 'a seq -> 'a seq
 
-fun map f nil = nil
-  | map f (h::t) = (f h) :: (map f t)
+		val loopback : ('a seq -> 'a seq) -> 'a seq
+	end
 
-fun curry f x y = f (x, y)
+structure Sequence :> SEQUENCE =
+	struct
+		type 'a seq = int -> 'a
 
-fun map f l = ((curry map') f) l
+		fun constantly c n = c
+		fun alternately (c, d) n =
+			if n mod 2 = 0 then c else d
+		fun insert (x, s) 0 = x
+			| insert (x, s) n = s (n - 1)
 
-fun add_up nil = 0
-  | add_up (h::t) = h + add_up t
+		fun map f s = f o s
+		fun filter p s n =
+			let
+				val x = s n
+			in
+				if p x then x else filter p s (n + 1)
+			end
 
-fun mul_up nil = 1
-  | mul_up (h::t) = h * mul_up t
+		fun zip (s1, s2) n = (s1 n, s2 n)
+		fun unzip (s : ('a * 'b) seq) =
+				(map #1 s, map #2 s)
+		fun merge (s1, s2) n =
+				(if n mod 2 = 0 then s1 else s2) (n div 2)
 
-fun foldr (f, z, l) =
-  let
-    fun foldr nil = z
-      | foldr (h::t) = f (h, foldr t)
-  in
-    foldr l
-  end
+		fun stretch k s n = s (n div k)
+		fun shrink k s n = s (n * k)
 
-fun reduce (f, z, l) = foldr (f, z, l)
+		fun drop k s n = s (n + k)
+		fun shift s = drop 1 s
+		fun take 0 _ = nil
+			| take n s = s 0 :: take (n - 1) (shift s)
 
-fun add_up l = reduce (op +, 0, l)
-fun mul_up l = reduce (op *, 0, l)
+		fun loopback loop n = loop (loopback loop) n
+	end
 
-fun mystery l = reduce (op ::, nil, l)
+open Sequence
 
-fun curry_foldr (f, z) =
-  let
-    fun curry_foldr nil = z
-      | curry_foldr (h::t) = f (h, curry_foldr t)
-  in
-    curry_foldr
-  end
+val evens : int seq = fn n => 2 * n
+val odds : int seq = fn n => 2 * n + 1
+val nats : int seq = merge (evens, odds)
+fun fibs n =
+	(insert (1, insert (1, map (op +) (zip (drop 1 fibs, fibs)))))(n);
 
-fun curried_foldr (f, z) nil = z
-  | curried_foldr (f, z) (h::t) =
-    f (z, curried_foldr (f, z) t)
+take 10 nats;
+take 5 (drop 5 nats);
+take 5 fibs;
 
-fun append (nil, l) = l
-  | append (h::t, l) = h :: append (t, l)
+fun fibs_loop s = 
+	insert (1, insert (1,
+		map (op +) (zip (drop 1 s, s))))
+val fibs = loopback fibs_loop;
 
-fun curried_append nil l = l
-  | curried_append (h::t) l = h :: curried_append t l
+(*fun bad_loop s n = s n + 1
+val bad = loopback bad_loop
+val _ = bad 0 *)
 
-fun staged_append nil = (fn l => l)
-  | staged_append (h::t) =
+datatype level = High | Low | Undef
+type wire = level seq
+type pair = (level * level) seq
+val Zero : wire = constantly Low
+val One : wire = constantly High
+fun clock (freq:int):wire = 
+	stretch freq (alternately (Low, High))
+
+infixr **;
+fun (f ** g) (x, y) = (f x, g y)
+
+fun logical_and (Low, _) = Low
+	| logical_and (_, Low) = Low
+	| logical_and (High, High) = High
+	| logical_and _ = Undef
+
+fun logical_not Undef = Undef
+	| logical_not High = Low
+	| logical_not Low = High
+
+fun logical_nop 1 = 1
+
+val logical_nor = logical_and o (logical_not ** logical_not)
+
+type unary_gate = wire -> wire
+type binary_gate = pair -> wire
+
+fun gate f w 0 = Undef
+	| gate f w i = f (w (i - 1))
+
+(*val delay : unary_gate = gate logical_nop*)
+val inverter : unary_gate = gate logical_not
+val nor_gate : binary_gate = gate logical_nor
+
+fun RS_ff (S : wire, R : wire) =
+	let
+		fun X n = nor_gate (zip (S, Y)) n
+		and Y n = nor_gate (zip (X, R)) n
+	in
+		Y
+	end
+
+fun pulse b 0 w i = w i
+	| pulse b n w 0 = b
+	| pulse b n w i = pulse b (n - 1) w (i - 1)
+
+(*val S = pulse Low 2 (pulse High 2 Z)
+val R = pulse Low 6 (pulse High 2 Z)
+val Q = RS_ff (S, R)
+val _ = take 20 Q
+val X = RS_ff (S, S)
+val _ = take 20 X *)
+
+fun loopback2 (f : wire * wire -> wire * wire) =
+    unzip (loopback (zip o f o unzip))
+
+fun RS_ff' (S : wire, R : wire) =
     let
-      val tail_appender = staged_append t
+	fun RS_loop (X, Y) =
+	    (nor_gate (zip (S, Y)), nor_gate (zip (X, R)))
     in
-      fn l => h :: tail_appender l
+	loopback2 RS_loop
     end
+
+fun FAIL cs k = false
+fun NULL cs k = k cs
+fun LITERALLY c cs k =
+	(case cs of nil => false | c'::cs' => (c=c') andalso (k cs'))
+fun OR (m1, m2) cs k = m1 cs k orelse m2 cs k
+infix 8 OR
+fun THEN (m1, m2) cs k = m1 cs (fn cs' => m2 cs' k)
+infix 9 THEN
+fun REPEATEDLY m cs k =
+	let
+		fun mstar cs' = k cs' orelse m cs' mstar
+	in
+		mstar cs
+	end
+
+(*fun match Zero = FAIL
+	| match One = NULL
+	| match (Char c) = LITERALLY c
+	| match (Plus (r1, r2)) = match r1 OR match r2
+	| match (Times (r1, r2)) = match r1 THEN match r2
+	| match (Star r) = REPEATEDLY (match r)
+fun accepts regexp = 
+	let
+		val matcher = match regexp
+		val done = fn nil => true | _ => false
+	in
+		fn str => matcher (String.explode string) done
+	end *)
